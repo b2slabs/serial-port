@@ -25,7 +25,9 @@ export function ConnectionControls() {
   }
 
   const isConnected = status === 'connected'
-  const isConnecting = status === 'connecting'
+  // 'reconnecting' covers the post-unplug auto-recovery attempt in flight;
+  // disabled alongside 'connecting' so a manual click can't race it.
+  const isConnecting = status === 'connecting' || status === 'reconnecting'
 
   return (
     <div className="flex flex-wrap items-center gap-4">
@@ -48,7 +50,7 @@ export function ConnectionControls() {
             void connect()
           }}
         >
-          {isConnecting ? 'Connecting…' : 'Connect'}
+          {status === 'reconnecting' ? 'Reconnecting…' : isConnecting ? 'Connecting…' : 'Connect'}
         </button>
       )}
 

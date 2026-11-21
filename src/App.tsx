@@ -1,6 +1,7 @@
 import { ConnectionStoreProvider } from './store/ConnectionStoreProvider'
 import { ConnectionControls } from './components/ConnectionControls'
 import { ConnectionStatus } from './components/ConnectionStatus'
+import { UnplugWarning } from './components/UnplugWarning'
 import { SerialTerminal } from './components/SerialTerminal'
 import { Composer } from './components/Composer'
 
@@ -12,6 +13,7 @@ function App() {
           <ConnectionControls />
           <ConnectionStatus />
         </header>
+        <UnplugWarning />
         <main className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="min-h-0 flex-1">
             <SerialTerminal />

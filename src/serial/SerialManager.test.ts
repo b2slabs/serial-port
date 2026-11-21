@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SerialManager } from './SerialManager'
 import { FakeSerial, FakeSerialPort } from './testing/fakeSerial'
 
@@ -210,6 +210,110 @@ describe('SerialManager', () => {
 
       expect(manager.state).toBe('error')
       expect(manager.error).toBe('Device is busy.')
+    })
+  })
+
+  describe('USB unplug/replug auto-recovery', () => {
+    it('transitions to unexpected-disconnect and halts further sends when the device unplugs', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+      const manager = new SerialManager(fakeSerial)
+      await manager.connect({ baudRate: 9600 })
+
+      fakeSerial.simulateDisconnect(fakePort)
+
+      expect(manager.state).toBe('unexpected-disconnect')
+      await expect(manager.send('hello')).rejects.toThrow(
+        'Cannot send while disconnected.',
+      )
+    })
+
+    it('automatically reopens with the retained baud rate when the device reappears', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+      const manager = new SerialManager(fakeSerial)
+      await manager.connect({ baudRate: 57600 })
+
+      fakeSerial.simulateDisconnect(fakePort)
+      expect(manager.state).toBe('unexpected-disconnect')
+
+      const replugged = new FakeSerialPort()
+      fakeSerial.getPorts.mockResolvedValue([replugged])
+      fakeSerial.simulateConnect(replugged)
+
+      await vi.waitFor(() => {
+        expect(manager.state).toBe('connected')
+      })
+      expect(replugged.open).toHaveBeenCalledWith({
+        baudRate: 57600,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+      })
+    })
+
+    it('falls back to a manual-connect-available error state when the device reappears ambiguously (zero/multiple matches)', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+      const manager = new SerialManager(fakeSerial)
+      await manager.connect({ baudRate: 9600 })
+
+      fakeSerial.simulateDisconnect(fakePort)
+      fakeSerial.getPorts.mockResolvedValue([])
+      fakeSerial.simulateConnect(fakePort)
+
+      await vi.waitFor(() => {
+        expect(manager.state).toBe('error')
+      })
+      expect(manager.error).toBe('Automatic reconnect failed: device not found.')
+    })
+
+    it('falls back to a manual-connect-available error state when the automatic reopen fails to open', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+      const manager = new SerialManager(fakeSerial)
+      await manager.connect({ baudRate: 9600 })
+
+      fakeSerial.simulateDisconnect(fakePort)
+
+      const replugged = new FakeSerialPort()
+      replugged.openError = new Error('Device is busy.')
+      fakeSerial.getPorts.mockResolvedValue([replugged])
+      fakeSerial.simulateConnect(replugged)
+
+      await vi.waitFor(() => {
+        expect(manager.state).toBe('error')
+      })
+      expect(manager.error).toBe('Device is busy.')
+    })
+
+    it('never transitions away from connected purely from elapsed idle time, however long the device stays quiet', async () => {
+      vi.useFakeTimers()
+      try {
+        const fakeSerial = new FakeSerial()
+        const fakePort = new FakeSerialPort()
+        fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+        const manager = new SerialManager(fakeSerial)
+        await manager.connect({ baudRate: 9600 })
+
+        // Advance far past any plausible idle/activity timeout; no data,
+        // no disconnect event, no user action.
+        await vi.advanceTimersByTimeAsync(7 * 24 * 60 * 60 * 1000)
+
+        expect(manager.state).toBe('connected')
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

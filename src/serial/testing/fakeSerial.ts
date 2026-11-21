@@ -63,8 +63,32 @@ export class FakeSerialPort implements SerialPortLike {
   }
 }
 
-/** Fake `Serial` (the `navigator.serial` object). */
-export class FakeSerial implements SerialLike {
+/**
+ * Fake `Serial` (the `navigator.serial` object). Extends the real
+ * `EventTarget` global so it satisfies `SerialLike`'s `addEventListener`/
+ * `removeEventListener` for the `connect`/`disconnect` events exactly as the
+ * real `navigator.serial` does.
+ */
+export class FakeSerial extends EventTarget implements SerialLike {
   requestPort = vi.fn<() => Promise<SerialPortLike>>()
   getPorts = vi.fn<() => Promise<SerialPortLike[]>>().mockResolvedValue([])
+
+  /**
+   * Test helper: simulate the browser firing `disconnect` for `port` (e.g. a
+   * USB unplug). Real `event.target` is the `SerialPort` instance; a plain
+   * `Event`'s `target` is normally set by the dispatch mechanism and isn't
+   * writable directly, so it's set here via `defineProperty` to match.
+   */
+  simulateDisconnect(port: SerialPortLike) {
+    const event = new Event('disconnect')
+    Object.defineProperty(event, 'target', { value: port, configurable: true })
+    this.dispatchEvent(event)
+  }
+
+  /** Test helper: simulate the browser firing `connect` for `port` (replug). */
+  simulateConnect(port: SerialPortLike) {
+    const event = new Event('connect')
+    Object.defineProperty(event, 'target', { value: port, configurable: true })
+    this.dispatchEvent(event)
+  }
 }

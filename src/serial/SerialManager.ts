@@ -45,9 +45,27 @@ export class SerialManager extends EventTarget {
   #disconnecting = false
   #keepReading = true
 
+  /**
+   * Retained in-memory profile from the last successful open, used to
+   * auto-reopen after a USB unplug/replug (ticket #5). Deliberately never
+   * cleared on `unexpected-disconnect` — that's the whole point of
+   * "retaining" it.
+   */
+  #activeOptions: ConnectOptions | null = null
+
+  /**
+   * Incremented on every successful `#openAndTrack`. Lets a stale read
+   * loop (from a session that's already been superseded by an
+   * auto-recovery reopen) recognize it's stale and avoid clobbering the
+   * new session's state/reader on its way out.
+   */
+  #sessionId = 0
+
   constructor(serial: SerialLike) {
     super()
     this.#serial = serial
+    this.#serial.addEventListener('disconnect', this.#handleSerialDisconnect)
+    this.#serial.addEventListener('connect', this.#handleSerialConnect)
   }
 
   get state(): ConnectionState {
@@ -80,12 +98,25 @@ export class SerialManager extends EventTarget {
    * than guessing which adapter is the right one.
    */
   async reconnect(options: ConnectOptions): Promise<ReconnectOutcome> {
+    return this.#reopenFromSavedProfile(options, 'connecting')
+  }
+
+  /**
+   * Shared "reopen with a saved profile" routine behind both the page-load
+   * reconnect (`reconnect()`, ticket #4) and the post-unplug auto-recovery
+   * path below (ticket #5) — the two differ only in which intermediate
+   * state they show while the attempt is in flight.
+   */
+  async #reopenFromSavedProfile(
+    options: ConnectOptions,
+    pendingState: 'connecting' | 'reconnecting',
+  ): Promise<ReconnectOutcome> {
     const ports = await this.#serial.getPorts()
     if (ports.length !== 1) {
       return 'no-saved-match'
     }
 
-    this.#setState('connecting')
+    this.#setState(pendingState)
     await this.#openAndTrack(ports[0], options.baudRate)
     return 'reconnected'
   }
@@ -101,14 +132,68 @@ export class SerialManager extends EventTarget {
       throw err
     }
 
+    const sessionId = ++this.#sessionId
     this.#port = port
+    this.#activeOptions = { baudRate }
     this.#disconnecting = false
     this.#keepReading = true
     this.#setState('connected', undefined, port.getInfo?.())
 
     // Fire-and-forget: started synchronously (up to its first await) so the
     // reader is already attached by the time this resolves.
-    this.#readLoopPromise = this.#readLoop(port)
+    this.#readLoopPromise = this.#readLoop(port, sessionId)
+  }
+
+  /**
+   * Browser signal that a previously authorized port physically
+   * disconnected (USB unplug). Ignored unless it's our currently-open port
+   * and we're actually connected (e.g. not a stray event for some other
+   * authorized device). Halts reads/writes immediately but deliberately
+   * keeps `#activeOptions` so the retained profile survives for recovery.
+   */
+  #handleSerialDisconnect = (event: Event): void => {
+    if (this.#state !== 'connected') {
+      return
+    }
+    const target = (event as unknown as { target?: unknown }).target
+    if (target != null && target !== this.#port) {
+      return
+    }
+
+    this.#keepReading = false
+    this.#reader?.cancel().catch(() => {})
+    this.#port = null
+    this.#setState('unexpected-disconnect')
+  }
+
+  /**
+   * Browser signal that a previously authorized port reappeared (replug).
+   * Only meaningful while waiting for recovery; triggers an automatic
+   * reopen attempt using the retained profile.
+   */
+  #handleSerialConnect = (): void => {
+    if (this.#state !== 'unexpected-disconnect') {
+      return
+    }
+    void this.#autoRecover()
+  }
+
+  async #autoRecover(): Promise<void> {
+    const options = this.#activeOptions
+    if (!options) {
+      this.#setState('error', 'Automatic reconnect failed: no saved connection.')
+      return
+    }
+
+    try {
+      const outcome = await this.#reopenFromSavedProfile(options, 'reconnecting')
+      if (outcome === 'no-saved-match') {
+        this.#setState('error', 'Automatic reconnect failed: device not found.')
+      }
+    } catch {
+      // #openAndTrack already surfaced the failure via #setState('error', ...);
+      // swallow here so a failed auto-recovery isn't an unhandled rejection.
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -149,7 +234,7 @@ export class SerialManager extends EventTarget {
     }
   }
 
-  async #readLoop(port: SerialPortLike): Promise<void> {
+  async #readLoop(port: SerialPortLike, sessionId: number): Promise<void> {
     const decoder = new TextDecoder()
 
     while (port.readable && this.#keepReading) {
@@ -175,9 +260,16 @@ export class SerialManager extends EventTarget {
       }
     }
 
+    // A stale loop (superseded by a newer session via auto-recovery while
+    // this one was still draining) must not clobber the new session's
+    // reader or flip its state to 'error'.
+    if (sessionId !== this.#sessionId) {
+      return
+    }
+
     this.#reader = null
 
-    if (!this.#disconnecting) {
+    if (!this.#disconnecting && this.#state === 'connected') {
       this.#setState('error', 'Connection lost.')
     }
   }

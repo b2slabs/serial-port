@@ -33,14 +33,34 @@ export interface SerialPortLike {
   getInfo?(): SerialPortInfoLike
 }
 
-/** Mirrors the subset of `Serial` (navigator.serial) this app depends on. */
+/**
+ * Mirrors the subset of `Serial` (navigator.serial) this app depends on,
+ * including the `connect`/`disconnect` events fired when a previously
+ * authorized port reappears/disappears (the signal that drives USB
+ * unplug/replug auto-recovery). `event.target` on those events is the
+ * `SerialPort` instance that changed.
+ */
 export interface SerialLike {
   requestPort(): Promise<SerialPortLike>
   getPorts(): Promise<SerialPortLike[]>
+  addEventListener(
+    type: 'connect' | 'disconnect',
+    listener: (event: Event) => void,
+  ): void
+  removeEventListener(
+    type: 'connect' | 'disconnect',
+    listener: (event: Event) => void,
+  ): void
 }
 
 /** Connection states visible to the UI at all times. */
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
+export type ConnectionState =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'unexpected-disconnect'
+  | 'reconnecting'
+  | 'error'
 
 /** Fixed serial defaults: only baudRate is ever user-facing. */
 export const FIXED_SERIAL_DEFAULTS = {
