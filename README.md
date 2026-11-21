@@ -39,3 +39,38 @@ npm run lint
 Requires a Chromium-based browser (Chrome, Edge) and a secure context
 (HTTPS, or localhost for dev) — the Web Serial API isn't available
 elsewhere.
+
+## Deploying
+
+The app is hosted on GitHub Pages at <https://b2slabs.github.io/serial-port/>.
+`vite.config.ts` sets `base: '/serial-port/'` to match that subpath. Deploys
+are a manual step (no CI automation in v1): build the app, then publish
+`dist/` as the `gh-pages` branch via a throwaway worktree.
+
+```bash
+npm run build
+
+rm -rf /tmp/gh-pages-worktree
+git worktree add -f /tmp/gh-pages-worktree gh-pages 2>/dev/null \
+  || git worktree add -f /tmp/gh-pages-worktree --orphan gh-pages
+
+rm -rf /tmp/gh-pages-worktree/*
+cp -r dist/* /tmp/gh-pages-worktree/
+touch /tmp/gh-pages-worktree/.nojekyll
+
+git -C /tmp/gh-pages-worktree add -A
+git -C /tmp/gh-pages-worktree commit -m "Deploy $(git rev-parse --short HEAD)"
+git -C /tmp/gh-pages-worktree \
+  -c credential.helper= -c credential.helper="!gh auth git-credential" \
+  push origin gh-pages
+
+git worktree remove /tmp/gh-pages-worktree
+```
+
+GitHub Pages is configured (once) to serve from the `gh-pages` branch, root
+folder:
+
+```bash
+gh api -X POST repos/b2slabs/serial-port/pages \
+  -f "source[branch]=gh-pages" -f "source[path]=/"
+```
