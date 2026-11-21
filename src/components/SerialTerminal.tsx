@@ -7,9 +7,9 @@ const SCROLLBACK_LINES = 10_000
 
 /**
  * Output-only terminal: renders decoded incoming bytes live. Fixed 10,000
- * line scrollback, not configurable in this ticket. Sending/typed input is
- * out of scope here (ticket #3), so `disableStdin` is set and `onData` is
- * never wired up.
+ * line scrollback, not configurable in this ticket. Outgoing commands go
+ * through the separate `Composer` component (ticket #3), not through this
+ * terminal, so `disableStdin` is set and `onData` is never wired up.
  */
 export function SerialTerminal() {
   const containerRef = useRef<HTMLDivElement>(null)

@@ -2,6 +2,7 @@ import { ConnectionStoreProvider } from './store/ConnectionStoreProvider'
 import { ConnectionControls } from './components/ConnectionControls'
 import { ConnectionStatus } from './components/ConnectionStatus'
 import { SerialTerminal } from './components/SerialTerminal'
+import { Composer } from './components/Composer'
 
 function App() {
   return (
@@ -11,8 +12,11 @@ function App() {
           <ConnectionControls />
           <ConnectionStatus />
         </header>
-        <main className="min-h-0 flex-1">
-          <SerialTerminal />
+        <main className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="min-h-0 flex-1">
+            <SerialTerminal />
+          </div>
+          <Composer />
         </main>
       </div>
     </ConnectionStoreProvider>

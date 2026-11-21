@@ -19,6 +19,11 @@ export interface ConnectionStore {
    * component uses this to write straight into xterm.js.
    */
   subscribeToData: (listener: (chunk: string) => void) => () => void
+  /** Buffered composer text; held here rather than local component state. */
+  composerText: string
+  setComposerText: (text: string) => void
+  /** Sends the buffered composer text through SerialManager, then clears it. */
+  send: () => Promise<void>
 }
 
 /**
@@ -91,6 +96,14 @@ export function createConnectionStore(
         }
         manager.addEventListener('data', handler)
         return () => manager.removeEventListener('data', handler)
+      },
+      composerText: '',
+      setComposerText: (text) => set({ composerText: text }),
+      send: async () => {
+        if (!manager) return
+        const { composerText } = get()
+        await manager.send(composerText)
+        set({ composerText: '' })
       },
     }
   })
