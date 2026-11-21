@@ -105,4 +105,27 @@ describe('SerialManager', () => {
 
     expect(manager.state).toBe('error')
   })
+
+  it('writes the buffered text with a fixed line ending appended, UTF-8 encoded, to the writer', async () => {
+    const fakeSerial = new FakeSerial()
+    const fakePort = new FakeSerialPort()
+    fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+    const manager = new SerialManager(fakeSerial)
+    await manager.connect({ baudRate: 9600 })
+
+    await manager.send('hello')
+
+    expect(fakePort.writtenChunks).toHaveLength(1)
+    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('hello\r\n')
+  })
+
+  it('rejects a send attempted while disconnected instead of silently dropping it', async () => {
+    const fakeSerial = new FakeSerial()
+    const manager = new SerialManager(fakeSerial)
+
+    await expect(manager.send('hello')).rejects.toThrow(
+      'Cannot send while disconnected.',
+    )
+  })
 })

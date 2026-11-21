@@ -1,4 +1,4 @@
-import { FIXED_SERIAL_DEFAULTS } from './types'
+import { FIXED_SERIAL_DEFAULTS, LINE_ENDING } from './types'
 import type { ConnectionState, SerialLike, SerialPortLike } from './types'
 
 export interface ConnectOptions {
@@ -90,6 +90,26 @@ export class SerialManager extends EventTarget {
     this.#reader = null
     this.#readLoopPromise = null
     this.#setState('disconnected')
+  }
+
+  /**
+   * Encodes `text` as UTF-8, appends the fixed line ending, and writes it to
+   * the open port. No-op target for disconnected state: throws rather than
+   * silently dropping the command.
+   */
+  async send(text: string): Promise<void> {
+    const port = this.#port
+    if (!port || !port.writable) {
+      throw new Error('Cannot send while disconnected.')
+    }
+
+    const encoded = new TextEncoder().encode(text + LINE_ENDING)
+    const writer = port.writable.getWriter()
+    try {
+      await writer.write(encoded)
+    } finally {
+      writer.releaseLock()
+    }
   }
 
   async #readLoop(port: SerialPortLike): Promise<void> {

@@ -49,3 +49,6 @@ export const FIXED_SERIAL_DEFAULTS = {
   parity: 'none',
   flowControl: 'none',
 } as const
+
+/** Fixed line ending appended to every sent command. Not user-configurable in the MVP. */
+export const LINE_ENDING = '\r\n'
