@@ -105,4 +105,88 @@ describe('SerialManager', () => {
 
     expect(manager.state).toBe('error')
   })
+
+  describe('reconnect (page-load reconnect-on-refresh)', () => {
+    it('auto-reopens with the saved baud rate when getPorts() has exactly one match', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.getPorts.mockResolvedValue([fakePort])
+
+      const manager = new SerialManager(fakeSerial)
+      const outcome = await manager.reconnect({ baudRate: 9600 })
+
+      expect(fakeSerial.requestPort).not.toHaveBeenCalled()
+      expect(fakePort.open).toHaveBeenCalledWith({
+        baudRate: 9600,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+      })
+      expect(manager.state).toBe('connected')
+      expect(outcome).toBe('reconnected')
+    })
+
+    it('resumes the data stream after an auto-reopen', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.getPorts.mockResolvedValue([fakePort])
+
+      const manager = new SerialManager(fakeSerial)
+      await manager.reconnect({ baudRate: 9600 })
+
+      const received: string[] = []
+      manager.addEventListener('data', (event) => {
+        received.push((event as CustomEvent<string>).detail)
+      })
+
+      fakePort.emit(new TextEncoder().encode('resumed\r\n'))
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(received.join('')).toBe('resumed\r\n')
+    })
+
+    it('falls back to manual connect (no auto-open) when getPorts() has zero matches', async () => {
+      const fakeSerial = new FakeSerial()
+      fakeSerial.getPorts.mockResolvedValue([])
+
+      const manager = new SerialManager(fakeSerial)
+      const outcome = await manager.reconnect({ baudRate: 9600 })
+
+      expect(outcome).toBe('no-saved-match')
+      expect(manager.state).toBe('disconnected')
+    })
+
+    it('falls back to manual connect (never guesses) when getPorts() has multiple matches', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePortA = new FakeSerialPort()
+      const fakePortB = new FakeSerialPort()
+      fakeSerial.getPorts.mockResolvedValue([fakePortA, fakePortB])
+
+      const manager = new SerialManager(fakeSerial)
+      const outcome = await manager.reconnect({ baudRate: 9600 })
+
+      expect(outcome).toBe('no-saved-match')
+      expect(manager.state).toBe('disconnected')
+      expect(fakePortA.open).not.toHaveBeenCalled()
+      expect(fakePortB.open).not.toHaveBeenCalled()
+    })
+
+    it('surfaces a clear error and leaves manual connect available when the matched port fails to open', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakePort.openError = new Error('Device is busy.')
+      fakeSerial.getPorts.mockResolvedValue([fakePort])
+
+      const manager = new SerialManager(fakeSerial)
+
+      await expect(manager.reconnect({ baudRate: 9600 })).rejects.toThrow(
+        'Device is busy.',
+      )
+
+      expect(manager.state).toBe('error')
+      expect(manager.error).toBe('Device is busy.')
+    })
+  })
 })

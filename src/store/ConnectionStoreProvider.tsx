@@ -2,6 +2,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import { createConnectionStore, type ConnectionStore } from './connectionStore'
 import { getWebSerial } from '../lib/webSerialSupport'
+import { getConnectionProfileStore } from '../lib/connectionProfileSupport'
 
 type ConnectionStoreApi = ReturnType<typeof createConnectionStore>
 
@@ -19,7 +20,9 @@ export function ConnectionStoreProvider({
   // though this component re-renders. Skipped entirely when a store is
   // injected (e.g. in tests).
   const [ownStore] = useState(() =>
-    store ? null : createConnectionStore(getWebSerial()),
+    store
+      ? null
+      : createConnectionStore(getWebSerial(), getConnectionProfileStore()),
   )
   const resolvedStore = store ?? ownStore!
   return (

@@ -1,5 +1,10 @@
 import { FIXED_SERIAL_DEFAULTS } from './types'
-import type { ConnectionState, SerialLike, SerialPortLike } from './types'
+import type {
+  ConnectionState,
+  SerialLike,
+  SerialPortInfoLike,
+  SerialPortLike,
+} from './types'
 
 export interface ConnectOptions {
   baudRate: number
@@ -8,7 +13,17 @@ export interface ConnectOptions {
 export interface StateChangeDetail {
   state: ConnectionState
   error?: string
+  /** Present on transitions to `connected`, from the port's `getInfo()`. */
+  deviceInfo?: SerialPortInfoLike
 }
+
+/**
+ * Result of a page-load reconnect attempt (see `reconnect()`): either the
+ * saved baud rate was successfully reapplied to the single matching
+ * already-authorized port, or there wasn't exactly one match and the caller
+ * should fall back to the manual Connect flow instead of guessing.
+ */
+export type ReconnectOutcome = 'reconnected' | 'no-saved-match'
 
 /**
  * Owns the lifecycle of a single Web Serial connection: requesting a port,
@@ -54,9 +69,31 @@ export class SerialManager extends EventTarget {
       throw err
     }
 
+    await this.#openAndTrack(port, options.baudRate)
+  }
+
+  /**
+   * Page-load reconnect: looks up already-authorized ports via `getPorts()`
+   * (never `requestPort()`, so no picker prompt) and, when exactly one
+   * matches, reopens it with the saved baud rate. Zero or multiple matches
+   * are ambiguous — the caller falls back to the manual Connect flow rather
+   * than guessing which adapter is the right one.
+   */
+  async reconnect(options: ConnectOptions): Promise<ReconnectOutcome> {
+    const ports = await this.#serial.getPorts()
+    if (ports.length !== 1) {
+      return 'no-saved-match'
+    }
+
+    this.#setState('connecting')
+    await this.#openAndTrack(ports[0], options.baudRate)
+    return 'reconnected'
+  }
+
+  async #openAndTrack(port: SerialPortLike, baudRate: number): Promise<void> {
     try {
       await port.open({
-        baudRate: options.baudRate,
+        baudRate,
         ...FIXED_SERIAL_DEFAULTS,
       })
     } catch (err) {
@@ -67,10 +104,10 @@ export class SerialManager extends EventTarget {
     this.#port = port
     this.#disconnecting = false
     this.#keepReading = true
-    this.#setState('connected')
+    this.#setState('connected', undefined, port.getInfo?.())
 
     // Fire-and-forget: started synchronously (up to its first await) so the
-    // reader is already attached by the time connect() resolves.
+    // reader is already attached by the time this resolves.
     this.#readLoopPromise = this.#readLoop(port)
   }
 
@@ -125,12 +162,16 @@ export class SerialManager extends EventTarget {
     }
   }
 
-  #setState(state: ConnectionState, error?: string) {
+  #setState(
+    state: ConnectionState,
+    error?: string,
+    deviceInfo?: SerialPortInfoLike,
+  ) {
     this.#state = state
     this.#error = error
     this.dispatchEvent(
       new CustomEvent<StateChangeDetail>('statechange', {
-        detail: { state, error },
+        detail: { state, error, deviceInfo },
       }),
     )
   }
