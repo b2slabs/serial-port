@@ -56,4 +56,70 @@ describe('BaudRateSelect', () => {
 
     expect(screen.getByLabelText('Baud rate')).toBeEnabled()
   })
+
+  it('does not apply the custom rate while still typing it, only on commit (Enter)', async () => {
+    const fakeSerial = new FakeSerial()
+    const fakePort = new FakeSerialPort()
+    fakeSerial.requestPort.mockResolvedValue(fakePort)
+    const store = createConnectionStore(fakeSerial)
+
+    render(
+      <ConnectionStoreProvider store={store}>
+        <ConnectionControls />
+      </ConnectionStoreProvider>,
+    )
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => {
+      expect(store.getState().status).toBe('connected')
+    })
+
+    await user.selectOptions(screen.getByLabelText('Baud rate'), 'custom')
+    const customInput = screen.getByPlaceholderText('Custom baud rate')
+
+    await user.type(customInput, '19200')
+    // Typing alone (digit by digit: 1, 19, 192, 1920, 19200) must not churn
+    // the live connection — only the initial connect's open() so far.
+    expect(fakePort.open).toHaveBeenCalledOnce()
+
+    await user.keyboard('{Enter}')
+    await waitFor(() => {
+      expect(fakePort.open).toHaveBeenLastCalledWith(
+        expect.objectContaining({ baudRate: 19200 }),
+      )
+    })
+    expect(fakePort.open).toHaveBeenCalledTimes(2)
+  })
+
+  it('applies the custom rate on blur, as an alternative commit to Enter', async () => {
+    const fakeSerial = new FakeSerial()
+    const fakePort = new FakeSerialPort()
+    fakeSerial.requestPort.mockResolvedValue(fakePort)
+    const store = createConnectionStore(fakeSerial)
+
+    render(
+      <ConnectionStoreProvider store={store}>
+        <ConnectionControls />
+      </ConnectionStoreProvider>,
+    )
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    await waitFor(() => {
+      expect(store.getState().status).toBe('connected')
+    })
+
+    await user.selectOptions(screen.getByLabelText('Baud rate'), 'custom')
+    const customInput = screen.getByPlaceholderText('Custom baud rate')
+
+    await user.type(customInput, '4800')
+    await user.tab() // blur
+
+    await waitFor(() => {
+      expect(fakePort.open).toHaveBeenLastCalledWith(
+        expect.objectContaining({ baudRate: 4800 }),
+      )
+    })
+  })
 })

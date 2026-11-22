@@ -15,6 +15,11 @@ const CUSTOM_VALUE = 'custom'
  * moves through `connecting` while the reopen is in flight. Only disabled
  * during that in-flight window (same set the Connect button uses), so a
  * second change can't race the first.
+ *
+ * The custom-rate input commits on blur/Enter, not on every keystroke: while
+ * connected, each commit drives a real close/reopen of the port, so typing
+ * "19200" one digit at a time must not churn the connection through 1, 19,
+ * 192, 1920 along the way.
  */
 export function BaudRateSelect() {
   const baudRate = useConnection((state) => state.baudRate)
@@ -70,11 +75,16 @@ export function BaudRateSelect() {
           value={customText}
           aria-invalid={customText.trim() !== '' && !customIsValid}
           onChange={(event) => {
-            const text = event.target.value
-            setCustomText(text)
-            const parsed = Number(text)
-            if (text.trim() !== '' && isValidCustomBaudRate(parsed)) {
-              setBaudRate(parsed)
+            setCustomText(event.target.value)
+          }}
+          onBlur={() => {
+            if (customIsValid) {
+              setBaudRate(customValue)
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && customIsValid) {
+              setBaudRate(customValue)
             }
           }}
         />
