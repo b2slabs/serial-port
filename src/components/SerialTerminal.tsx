@@ -72,6 +72,9 @@ export function SerialTerminal() {
     terminal.loadAddon(fitAddon)
     terminal.open(container)
     fitAddon.fit()
+    // Ticket #13: focus immediately so the page loads ready to type, with
+    // no click into the terminal required first.
+    terminal.focus()
     terminal.attachCustomKeyEventHandler(customKeyEventHandler)
 
     const resizeObserver = new ResizeObserver(() => fitAddon.fit())
