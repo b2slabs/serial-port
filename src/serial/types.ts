@@ -70,5 +70,11 @@ export const FIXED_SERIAL_DEFAULTS = {
   flowControl: 'none',
 } as const
 
-/** Fixed line ending appended to every sent command. Not user-configurable in the MVP. */
-export const LINE_ENDING = '\r\n'
+/**
+ * Fixed line ending appended to every sent command. Not user-configurable in
+ * the MVP. A single `\r` rather than `\r\n`: raw-REPL-style devices (e.g. a
+ * Raspberry Pi Pico running MicroPython) treat `\r` and `\n` as two
+ * independent Enter presses, so sending both terminators per command caused
+ * a spurious duplicate prompt reprint (ticket #10).
+ */
+export const LINE_ENDING = '\r'

@@ -117,7 +117,7 @@ describe('SerialManager', () => {
     await manager.send('hello')
 
     expect(fakePort.writtenChunks).toHaveLength(1)
-    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('hello\r\n')
+    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('hello\r')
   })
 
   it('rejects a send attempted while disconnected instead of silently dropping it', async () => {

@@ -34,7 +34,7 @@ describe('Composer', () => {
     await waitFor(() => {
       expect(fakePort.writtenChunks).toHaveLength(1)
     })
-    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('hello\r\n')
+    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('hello\r')
     expect(textbox).toHaveValue('')
   })
 
