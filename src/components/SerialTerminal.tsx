@@ -66,7 +66,7 @@ export function SerialTerminal() {
       scrollback: SCROLLBACK_LINES,
       disableStdin: false,
       convertEol: true,
-      cursorBlink: false,
+      cursorBlink: true,
     })
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
