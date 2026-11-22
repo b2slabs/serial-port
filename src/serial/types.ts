@@ -1,0 +1,71 @@
+/**
+ * Narrow injectable abstraction over the Web Serial API.
+ *
+ * `SerialManager` depends only on this interface, never on `navigator.serial`
+ * directly, so it can be driven by a fake in tests and by the real
+ * `navigator.serial` in production.
+ *
+ * Deliberately excludes `getSignals`/`setSignals` (DTR/RTS are out of scope).
+ */
+
+/** Options accepted by `SerialPortLike.open()`. */
+export interface SerialPortOpenOptions {
+  baudRate: number
+  dataBits?: 7 | 8
+  stopBits?: 1 | 2
+  parity?: 'none' | 'even' | 'odd'
+  bufferSize?: number
+  flowControl?: 'none' | 'hardware'
+}
+
+/** Mirrors the subset of `SerialPortInfo` this app cares about. */
+export interface SerialPortInfoLike {
+  usbVendorId?: number
+  usbProductId?: number
+}
+
+/** Mirrors the subset of `SerialPort` this app depends on. */
+export interface SerialPortLike {
+  readonly readable: ReadableStream<Uint8Array> | null
+  readonly writable: WritableStream<Uint8Array> | null
+  open(options: SerialPortOpenOptions): Promise<void>
+  close(): Promise<void>
+  getInfo?(): SerialPortInfoLike
+}
+
+/**
+ * Mirrors the subset of `Serial` (navigator.serial) this app depends on,
+ * including the `connect`/`disconnect` events fired when a previously
+ * authorized port reappears/disappears (the signal that drives USB
+ * unplug/replug auto-recovery). `event.target` on those events is the
+ * `SerialPort` instance that changed.
+ */
+export interface SerialLike {
+  requestPort(): Promise<SerialPortLike>
+  getPorts(): Promise<SerialPortLike[]>
+  addEventListener(
+    type: 'connect' | 'disconnect',
+    listener: (event: Event) => void,
+  ): void
+  removeEventListener(
+    type: 'connect' | 'disconnect',
+    listener: (event: Event) => void,
+  ): void
+}
+
+/** Connection states visible to the UI at all times. */
+export type ConnectionState =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'unexpected-disconnect'
+  | 'reconnecting'
+  | 'error'
+
+/** Fixed serial defaults: only baudRate is ever user-facing. */
+export const FIXED_SERIAL_DEFAULTS = {
+  dataBits: 8,
+  stopBits: 1,
+  parity: 'none',
+  flowControl: 'none',
+} as const
