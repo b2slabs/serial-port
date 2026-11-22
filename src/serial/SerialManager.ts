@@ -26,6 +26,23 @@ export interface StateChangeDetail {
 export type ReconnectOutcome = 'reconnected' | 'no-saved-match'
 
 /**
+ * The session-scoped state of a single open Web Serial connection: the open
+ * port, its currently-attached reader (while the read loop is actively
+ * reading — null between a reader release and the next `getReader()`), the
+ * read loop's promise (awaited by `disconnect()` before closing the port),
+ * and whether the read loop should keep running. Always replaced wholesale
+ * by a fresh object on open (never reused across sessions), so a stale read
+ * loop from a superseded session can recognize it no longer owns `#session`
+ * via a simple reference check instead of a separate id.
+ */
+interface Session {
+  port: SerialPortLike
+  reader: ReadableStreamDefaultReader<Uint8Array> | null
+  readLoopPromise: Promise<void> | null
+  keepReading: boolean
+}
+
+/**
  * Owns the lifecycle of a single Web Serial connection: requesting a port,
  * opening it with fixed defaults (only baudRate is user-facing), running the
  * cancelable read loop, and closing cleanly.
@@ -39,11 +56,16 @@ export class SerialManager extends EventTarget {
   #state: ConnectionState = 'disconnected'
   #error: string | undefined
 
-  #port: SerialPortLike | null = null
-  #reader: ReadableStreamDefaultReader<Uint8Array> | null = null
-  #readLoopPromise: Promise<void> | null = null
+  /** The currently open session, or `null` whenever nothing is open. */
+  #session: Session | null = null
+
+  /**
+   * True only while `disconnect()` is tearing down intentionally.
+   * Distinguishes that user-initiated close (where the read loop exiting is
+   * expected and shouldn't be reported as a failure) from a genuine fatal
+   * read error in `#readLoop`'s cleanup below.
+   */
   #disconnecting = false
-  #keepReading = true
 
   /**
    * Retained in-memory profile from the last successful open, used to
@@ -52,14 +74,6 @@ export class SerialManager extends EventTarget {
    * "retaining" it.
    */
   #activeOptions: ConnectOptions | null = null
-
-  /**
-   * Incremented on every successful `#openAndTrack`. Lets a stale read
-   * loop (from a session that's already been superseded by an
-   * auto-recovery reopen) recognize it's stale and avoid clobbering the
-   * new session's state/reader on its way out.
-   */
-  #sessionId = 0
 
   constructor(serial: SerialLike) {
     super()
@@ -94,8 +108,10 @@ export class SerialManager extends EventTarget {
    * Page-load reconnect: looks up already-authorized ports via `getPorts()`
    * (never `requestPort()`, so no picker prompt) and, when exactly one
    * matches, reopens it with the saved baud rate. Zero or multiple matches
-   * are ambiguous — the caller falls back to the manual Connect flow rather
-   * than guessing which adapter is the right one.
+   * are ambiguous — this transitions to `'error'` with a clear message (the
+   * same outcome `#autoRecover`'s equivalent case produces for the
+   * post-unplug path) so the caller always has a manual Connect path
+   * forward rather than being left at a silent, unexplained disconnected.
    */
   async reconnect(options: ConnectOptions): Promise<ReconnectOutcome> {
     return this.#reopenFromSavedProfile(options, 'connecting')
@@ -105,7 +121,11 @@ export class SerialManager extends EventTarget {
    * Shared "reopen with a saved profile" routine behind both the page-load
    * reconnect (`reconnect()`, ticket #4) and the post-unplug auto-recovery
    * path below (ticket #5) — the two differ only in which intermediate
-   * state they show while the attempt is in flight.
+   * state they show while the attempt is in flight. Zero/multiple matches
+   * are equally ambiguous for either caller ("never guess among ambiguous
+   * adapters"), so this is also where the resulting error state is set —
+   * both callers get the same clear, manual-connect-available outcome for
+   * the same logical situation instead of diverging.
    */
   async #reopenFromSavedProfile(
     options: ConnectOptions,
@@ -113,6 +133,7 @@ export class SerialManager extends EventTarget {
   ): Promise<ReconnectOutcome> {
     const ports = await this.#serial.getPorts()
     if (ports.length !== 1) {
+      this.#setState('error', 'Automatic reconnect failed: device not found.')
       return 'no-saved-match'
     }
 
@@ -132,16 +153,20 @@ export class SerialManager extends EventTarget {
       throw err
     }
 
-    const sessionId = ++this.#sessionId
-    this.#port = port
+    const session: Session = {
+      port,
+      reader: null,
+      readLoopPromise: null,
+      keepReading: true,
+    }
+    this.#session = session
     this.#activeOptions = { baudRate }
     this.#disconnecting = false
-    this.#keepReading = true
     this.#setState('connected', undefined, port.getInfo?.())
 
     // Fire-and-forget: started synchronously (up to its first await) so the
     // reader is already attached by the time this resolves.
-    this.#readLoopPromise = this.#readLoop(port, sessionId)
+    session.readLoopPromise = this.#readLoop(session)
   }
 
   /**
@@ -155,14 +180,17 @@ export class SerialManager extends EventTarget {
     if (this.#state !== 'connected') {
       return
     }
+    const session = this.#session
     const target = (event as unknown as { target?: unknown }).target
-    if (target != null && target !== this.#port) {
+    if (target != null && target !== session?.port) {
       return
     }
 
-    this.#keepReading = false
-    this.#reader?.cancel().catch(() => {})
-    this.#port = null
+    if (session) {
+      session.keepReading = false
+      session.reader?.cancel().catch(() => {})
+    }
+    this.#session = null
     this.#setState('unexpected-disconnect')
   }
 
@@ -186,10 +214,10 @@ export class SerialManager extends EventTarget {
     }
 
     try {
-      const outcome = await this.#reopenFromSavedProfile(options, 'reconnecting')
-      if (outcome === 'no-saved-match') {
-        this.#setState('error', 'Automatic reconnect failed: device not found.')
-      }
+      // 'no-saved-match' is already surfaced as 'error' by
+      // #reopenFromSavedProfile itself (see its doc comment) — nothing left
+      // to do with the outcome here.
+      await this.#reopenFromSavedProfile(options, 'reconnecting')
     } catch {
       // #openAndTrack already surfaced the failure via #setState('error', ...);
       // swallow here so a failed auto-recovery isn't an unhandled rejection.
@@ -197,20 +225,18 @@ export class SerialManager extends EventTarget {
   }
 
   async disconnect(): Promise<void> {
-    const port = this.#port
-    if (!port) {
+    const session = this.#session
+    if (!session) {
       return
     }
 
     this.#disconnecting = true
-    this.#keepReading = false
-    this.#reader?.cancel()
-    await this.#readLoopPromise
-    await port.close()
+    session.keepReading = false
+    session.reader?.cancel()
+    await session.readLoopPromise
+    await session.port.close()
 
-    this.#port = null
-    this.#reader = null
-    this.#readLoopPromise = null
+    this.#session = null
     this.#setState('disconnected')
   }
 
@@ -220,7 +246,7 @@ export class SerialManager extends EventTarget {
    * silently dropping the command.
    */
   async send(text: string): Promise<void> {
-    const port = this.#port
+    const port = this.#session?.port
     if (!port || !port.writable) {
       throw new Error('Cannot send while disconnected.')
     }
@@ -234,12 +260,13 @@ export class SerialManager extends EventTarget {
     }
   }
 
-  async #readLoop(port: SerialPortLike, sessionId: number): Promise<void> {
+  async #readLoop(session: Session): Promise<void> {
     const decoder = new TextDecoder()
+    const { port } = session
 
-    while (port.readable && this.#keepReading) {
+    while (port.readable && session.keepReading) {
       const reader = port.readable.getReader()
-      this.#reader = reader
+      session.reader = reader
       try {
         while (true) {
           const { value, done } = await reader.read()
@@ -261,13 +288,13 @@ export class SerialManager extends EventTarget {
     }
 
     // A stale loop (superseded by a newer session via auto-recovery while
-    // this one was still draining) must not clobber the new session's
-    // reader or flip its state to 'error'.
-    if (sessionId !== this.#sessionId) {
+    // this one was still draining, or torn down by an unexpected-disconnect)
+    // must not clobber the current session's state.
+    if (this.#session !== session) {
       return
     }
 
-    this.#reader = null
+    session.reader = null
 
     if (!this.#disconnecting && this.#state === 'connected') {
       this.#setState('error', 'Connection lost.')

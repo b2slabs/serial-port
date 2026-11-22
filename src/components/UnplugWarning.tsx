@@ -1,11 +1,5 @@
 import { useConnection } from '../store/ConnectionStoreProvider'
-import type { ConnectionState } from '../serial/types'
-
-const MESSAGES: Partial<Record<ConnectionState, string>> = {
-  'unexpected-disconnect':
-    'USB device disconnected. Waiting for it to reconnect…',
-  reconnecting: 'Reconnecting to the device…',
-}
+import { UNPLUG_RECOVERY_MESSAGES } from '../serial/connectionStateDisplay'
 
 /**
  * Prominent warning shown while the service is in `unexpected-disconnect` or
@@ -15,7 +9,7 @@ const MESSAGES: Partial<Record<ConnectionState, string>> = {
  */
 export function UnplugWarning() {
   const status = useConnection((state) => state.status)
-  const message = MESSAGES[status]
+  const message = UNPLUG_RECOVERY_MESSAGES[status]
 
   if (!message) {
     return null

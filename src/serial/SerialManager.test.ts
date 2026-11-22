@@ -170,7 +170,7 @@ describe('SerialManager', () => {
       expect(received.join('')).toBe('resumed\r\n')
     })
 
-    it('falls back to manual connect (no auto-open) when getPorts() has zero matches', async () => {
+    it('surfaces a clear error and leaves manual connect available (no auto-open) when getPorts() has zero matches', async () => {
       const fakeSerial = new FakeSerial()
       fakeSerial.getPorts.mockResolvedValue([])
 
@@ -178,10 +178,11 @@ describe('SerialManager', () => {
       const outcome = await manager.reconnect({ baudRate: 9600 })
 
       expect(outcome).toBe('no-saved-match')
-      expect(manager.state).toBe('disconnected')
+      expect(manager.state).toBe('error')
+      expect(manager.error).toBe('Automatic reconnect failed: device not found.')
     })
 
-    it('falls back to manual connect (never guesses) when getPorts() has multiple matches', async () => {
+    it('surfaces a clear error and never guesses when getPorts() has multiple matches', async () => {
       const fakeSerial = new FakeSerial()
       const fakePortA = new FakeSerialPort()
       const fakePortB = new FakeSerialPort()
@@ -191,7 +192,8 @@ describe('SerialManager', () => {
       const outcome = await manager.reconnect({ baudRate: 9600 })
 
       expect(outcome).toBe('no-saved-match')
-      expect(manager.state).toBe('disconnected')
+      expect(manager.state).toBe('error')
+      expect(manager.error).toBe('Automatic reconnect failed: device not found.')
       expect(fakePortA.open).not.toHaveBeenCalled()
       expect(fakePortB.open).not.toHaveBeenCalled()
     })

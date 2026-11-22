@@ -59,30 +59,36 @@ describe('createConnectionStore persistence wiring', () => {
     expect(useStore.getState().baudRate).toBe(57600)
   })
 
-  it('falls back to manual connect on creation when getPorts() has zero matches', async () => {
+  it('surfaces a clear error and leaves manual connect available on creation when getPorts() has zero matches', async () => {
     const fakeSerial = new FakeSerial()
     fakeSerial.getPorts.mockResolvedValue([])
     const profileStore = new ConnectionProfileStore(createMemoryStorage())
     profileStore.save(57600, { usbVendorId: 0x2341 })
 
     const useStore = createConnectionStore(fakeSerial, profileStore)
-    await Promise.resolve()
-    await Promise.resolve()
 
-    expect(useStore.getState().status).toBe('disconnected')
+    await vi.waitFor(() => {
+      expect(useStore.getState().status).toBe('error')
+    })
+    expect(useStore.getState().error).toBe(
+      'Automatic reconnect failed: device not found.',
+    )
   })
 
-  it('falls back to manual connect on creation when getPorts() has multiple matches', async () => {
+  it('surfaces a clear error and leaves manual connect available on creation when getPorts() has multiple matches', async () => {
     const fakeSerial = new FakeSerial()
     fakeSerial.getPorts.mockResolvedValue([new FakeSerialPort(), new FakeSerialPort()])
     const profileStore = new ConnectionProfileStore(createMemoryStorage())
     profileStore.save(57600, { usbVendorId: 0x2341 })
 
     const useStore = createConnectionStore(fakeSerial, profileStore)
-    await Promise.resolve()
-    await Promise.resolve()
 
-    expect(useStore.getState().status).toBe('disconnected')
+    await vi.waitFor(() => {
+      expect(useStore.getState().status).toBe('error')
+    })
+    expect(useStore.getState().error).toBe(
+      'Automatic reconnect failed: device not found.',
+    )
   })
 
   it('surfaces a clear error and leaves manual connect available when the auto-reopen fails', async () => {

@@ -1,5 +1,9 @@
 import { BaudRateSelect } from './BaudRateSelect'
 import { useConnection } from '../store/ConnectionStoreProvider'
+import {
+  CONNECT_ATTEMPT_IN_FLIGHT_STATES,
+  CONNECTION_STATE_LABELS,
+} from '../serial/connectionStateDisplay'
 
 /**
  * Connect/Disconnect buttons and baud rate selection.
@@ -25,9 +29,9 @@ export function ConnectionControls() {
   }
 
   const isConnected = status === 'connected'
-  // 'reconnecting' covers the post-unplug auto-recovery attempt in flight;
-  // disabled alongside 'connecting' so a manual click can't race it.
-  const isConnecting = status === 'connecting' || status === 'reconnecting'
+  // Covers both the initial connect and the post-unplug auto-recovery
+  // attempt in flight; disabled so a manual click can't race either.
+  const isConnecting = CONNECT_ATTEMPT_IN_FLIGHT_STATES.has(status)
 
   return (
     <div className="flex flex-wrap items-center gap-4">
@@ -50,7 +54,7 @@ export function ConnectionControls() {
             void connect()
           }}
         >
-          {status === 'reconnecting' ? 'Reconnecting…' : isConnecting ? 'Connecting…' : 'Connect'}
+          {isConnecting ? CONNECTION_STATE_LABELS[status] : 'Connect'}
         </button>
       )}
 

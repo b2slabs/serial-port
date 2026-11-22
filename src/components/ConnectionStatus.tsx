@@ -1,14 +1,6 @@
 import { useConnection } from '../store/ConnectionStoreProvider'
 import type { ConnectionState } from '../serial/types'
-
-const LABELS: Record<ConnectionState, string> = {
-  disconnected: 'Disconnected',
-  connecting: 'Connecting…',
-  connected: 'Connected',
-  'unexpected-disconnect': 'Unexpected disconnect',
-  reconnecting: 'Reconnecting…',
-  error: 'Error',
-}
+import { CONNECTION_STATE_LABELS } from '../serial/connectionStateDisplay'
 
 const DOT_CLASSES: Record<ConnectionState, string> = {
   disconnected: 'bg-zinc-500',
@@ -30,7 +22,7 @@ export function ConnectionStatus() {
         className={`inline-block h-2.5 w-2.5 rounded-full ${DOT_CLASSES[status]}`}
         aria-hidden="true"
       />
-      <span className="font-medium">{LABELS[status]}</span>
+      <span className="font-medium">{CONNECTION_STATE_LABELS[status]}</span>
       {status === 'error' && error ? (
         <span className="text-red-400">({error})</span>
       ) : null}

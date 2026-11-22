@@ -1,8 +1,8 @@
-import { create } from 'zustand'
+import { create, type StoreApi } from 'zustand'
 import { SerialManager, type StateChangeDetail } from '../serial/SerialManager'
 import type { ConnectionState, SerialLike } from '../serial/types'
 import { DEFAULT_BAUD_RATE } from '../lib/baudRates'
-import type { ConnectionProfileStore } from '../serial/persistence'
+import type { ConnectionProfile, ConnectionProfileStore } from '../serial/persistence'
 
 export interface ConnectionStore {
   /** Whether the browser supports the Web Serial API at all. */
@@ -44,35 +44,14 @@ export function createConnectionStore(
 ) {
   const manager = serial ? new SerialManager(serial) : null
 
+  // Read up front, not via a `set()` call inside the initializer below:
+  // any `set()` made during that initializer, before it returns, would be
+  // clobbered by the initial-state object it returns — zustand treats that
+  // return value as the baseline, not a merge.
+  const profile = manager && profileStore ? profileStore.load() : null
+
   const useConnectionStore = create<ConnectionStore>()((set, get) => {
-    manager?.addEventListener('statechange', (event) => {
-      const { state, error, deviceInfo } = (
-        event as CustomEvent<StateChangeDetail>
-      ).detail
-      set({ status: state, error })
-
-      if (state === 'connected' && profileStore) {
-        profileStore.save(get().baudRate, deviceInfo ?? {})
-      }
-    })
-
-    // On creation (app start), attempt the page-load reconnect described in
-    // ticket #4: a saved, unexpired profile's baud rate is reapplied only
-    // when getPorts() resolves exactly one match. Zero/multiple matches, or
-    // a failed reopen, fall back to the existing manual Connect flow (the
-    // latter surfaces its error via the statechange listener above).
-    //
-    // The profile is read here (rather than via a `set()` call) because any
-    // `set()` made during this initializer, before it returns, would be
-    // clobbered by the initial-state object returned below — zustand treats
-    // that return value as the baseline, not a merge.
-    const profile = manager && profileStore ? profileStore.load() : null
-    if (profile && manager) {
-      manager.reconnect({ baudRate: profile.baudRate }).catch(() => {
-        // Failure is already surfaced via the statechange -> 'error'
-        // transition; swallow here so it isn't an unhandled rejection.
-      })
-    }
+    wireStatechangeAndPersistence(manager, profileStore, set, get)
 
     return {
       isSupported: manager !== null,
@@ -108,5 +87,55 @@ export function createConnectionStore(
     }
   })
 
+  // On creation (app start), attempt the page-load reconnect described in
+  // ticket #4. `manager.reconnect()` only takes effect asynchronously (its
+  // first step is an `await`), so kicking it off here — after the store
+  // exists — behaves identically to kicking it off from inside the
+  // initializer above, without needing the profile-timing workaround that
+  // would require.
+  bootstrapPageLoadReconnect(manager, profile)
+
   return useConnectionStore
+}
+
+/**
+ * Subscribes to the manager's `statechange` events for the lifetime of the
+ * store: mirrors state/error into it, and refreshes the persisted profile's
+ * 24h expiry on every successful (re)connect.
+ */
+function wireStatechangeAndPersistence(
+  manager: SerialManager | null,
+  profileStore: ConnectionProfileStore | null,
+  set: StoreApi<ConnectionStore>['setState'],
+  get: StoreApi<ConnectionStore>['getState'],
+): void {
+  manager?.addEventListener('statechange', (event) => {
+    const { state, error, deviceInfo } = (
+      event as CustomEvent<StateChangeDetail>
+    ).detail
+    set({ status: state, error })
+
+    if (state === 'connected' && profileStore) {
+      profileStore.save(get().baudRate, deviceInfo ?? {})
+    }
+  })
+}
+
+/**
+ * Attempts the page-load reconnect described in ticket #4: a saved,
+ * unexpired profile's baud rate is reapplied only when `getPorts()`
+ * resolves exactly one match. Zero/multiple matches, or a failed reopen,
+ * surface a clear error via the statechange -> 'error' transition (see
+ * `SerialManager#reconnect`), leaving the manual Connect flow available —
+ * handled entirely by the subscription wired up above, so failure here is
+ * swallowed rather than treated as an unhandled rejection.
+ */
+function bootstrapPageLoadReconnect(
+  manager: SerialManager | null,
+  profile: ConnectionProfile | null,
+): void {
+  if (!manager || !profile) {
+    return
+  }
+  manager.reconnect({ baudRate: profile.baudRate }).catch(() => {})
 }
