@@ -1,4 +1,4 @@
-import { FIXED_SERIAL_DEFAULTS, LINE_ENDING } from './types'
+import { FIXED_SERIAL_DEFAULTS } from './types'
 import type {
   ConnectionState,
   SerialLike,
@@ -268,17 +268,21 @@ export class SerialManager extends EventTarget {
   }
 
   /**
-   * Encodes `text` as UTF-8, appends the fixed line ending, and writes it to
-   * the open port. No-op target for disconnected state: throws rather than
-   * silently dropping the command.
+   * Encodes `data` as UTF-8 and writes it to the open port verbatim — no
+   * line ending or other transformation appended (ticket #11: raw
+   * per-keystroke passthrough superseded the buffered, CR-terminated
+   * composer send from ticket #10). Callers are expected to gate on
+   * connection state before invoking this; this method itself throws rather
+   * than silently dropping the bytes when nothing is open, so a caller that
+   * fails to gate finds out immediately instead of losing data quietly.
    */
-  async send(text: string): Promise<void> {
+  async send(data: string): Promise<void> {
     const port = this.#session?.port
     if (!port || !port.writable) {
       throw new Error('Cannot send while disconnected.')
     }
 
-    const encoded = new TextEncoder().encode(text + LINE_ENDING)
+    const encoded = new TextEncoder().encode(data)
     const writer = port.writable.getWriter()
     try {
       await writer.write(encoded)

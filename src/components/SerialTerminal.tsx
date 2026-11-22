@@ -23,14 +23,27 @@ export function customKeyEventHandler(event: KeyboardEvent): boolean {
 }
 
 /**
- * Output-only terminal: renders decoded incoming bytes live. Fixed 10,000
- * line scrollback, not configurable in this ticket. Outgoing commands go
- * through the separate `Composer` component (ticket #3), not through this
- * terminal, so `disableStdin` is set and `onData` is never wired up.
+ * The terminal is both the input and output surface (ticket #11, replacing
+ * the separate `Composer` from ticket #3): `disableStdin` is now `false`,
+ * and xterm's `onData` fires with the raw bytes of each keystroke — Enter
+ * already arrives as `'\r'` — which are forwarded verbatim to `sendRaw`.
+ * No local buffering, no app-appended line ending, and no local echo of any
+ * kind: the only bytes ever rendered are the ones that arrive from the
+ * device via `subscribeToData` below, so what appears while typing is
+ * exactly whatever the connected device echoes back over the wire.
+ *
+ * `attachCustomKeyEventHandler` (ticket #8) still runs first on every
+ * keydown: when it returns `false` for Ctrl+R / Cmd+R, xterm never processes
+ * that key at all, so `onData` never fires for it either and the browser's
+ * own refresh handling takes over instead. A raw per-keystroke send path and
+ * a custom key event handler aren't mutually exclusive.
+ *
+ * Fixed 10,000 line scrollback, not configurable in this ticket.
  */
 export function SerialTerminal() {
   const containerRef = useRef<HTMLDivElement>(null)
   const subscribeToData = useConnection((state) => state.subscribeToData)
+  const sendRaw = useConnection((state) => state.sendRaw)
 
   useEffect(() => {
     const container = containerRef.current
@@ -38,7 +51,7 @@ export function SerialTerminal() {
 
     const terminal = new Terminal({
       scrollback: SCROLLBACK_LINES,
-      disableStdin: true,
+      disableStdin: false,
       convertEol: true,
       cursorBlink: false,
     })
@@ -51,16 +64,20 @@ export function SerialTerminal() {
     const resizeObserver = new ResizeObserver(() => fitAddon.fit())
     resizeObserver.observe(container)
 
-    const unsubscribe = subscribeToData((chunk) => {
+    const unsubscribeData = subscribeToData((chunk) => {
       terminal.write(chunk)
+    })
+    const dataListener = terminal.onData((data) => {
+      sendRaw(data)
     })
 
     return () => {
-      unsubscribe()
+      unsubscribeData()
+      dataListener.dispose()
       resizeObserver.disconnect()
       terminal.dispose()
     }
-  }, [subscribeToData])
+  }, [subscribeToData, sendRaw])
 
   return (
     <div

@@ -106,7 +106,7 @@ describe('SerialManager', () => {
     expect(manager.state).toBe('error')
   })
 
-  it('writes the buffered text with a fixed line ending appended, UTF-8 encoded, to the writer', async () => {
+  it('writes text verbatim, UTF-8 encoded, with no line ending or other transformation appended', async () => {
     const fakeSerial = new FakeSerial()
     const fakePort = new FakeSerialPort()
     fakeSerial.requestPort.mockResolvedValue(fakePort)
@@ -117,7 +117,21 @@ describe('SerialManager', () => {
     await manager.send('hello')
 
     expect(fakePort.writtenChunks).toHaveLength(1)
-    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('hello\r')
+    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('hello')
+  })
+
+  it('passes a raw keystroke (e.g. Enter, which xterm reports as "\\r") through unchanged, with no extra terminator appended', async () => {
+    const fakeSerial = new FakeSerial()
+    const fakePort = new FakeSerialPort()
+    fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+    const manager = new SerialManager(fakeSerial)
+    await manager.connect({ baudRate: 9600 })
+
+    await manager.send('\r')
+
+    expect(fakePort.writtenChunks).toHaveLength(1)
+    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('\r')
   })
 
   it('rejects a send attempted while disconnected instead of silently dropping it', async () => {

@@ -118,6 +118,33 @@ describe('createConnectionStore persistence wiring', () => {
   })
 })
 
+describe('createConnectionStore sendRaw (ticket #11 raw terminal input)', () => {
+  it('forwards data verbatim to SerialManager while connected', async () => {
+    const fakeSerial = new FakeSerial()
+    const fakePort = new FakeSerialPort()
+    fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+    const useStore = createConnectionStore(fakeSerial)
+    await useStore.getState().connect()
+
+    useStore.getState().sendRaw('a')
+
+    await vi.waitFor(() => {
+      expect(fakePort.writtenChunks).toHaveLength(1)
+    })
+    expect(new TextDecoder().decode(fakePort.writtenChunks[0])).toBe('a')
+  })
+
+  it('is a no-op while disconnected', () => {
+    const fakeSerial = new FakeSerial()
+    const useStore = createConnectionStore(fakeSerial)
+
+    useStore.getState().sendRaw('a')
+
+    expect(fakeSerial.requestPort).not.toHaveBeenCalled()
+  })
+})
+
 describe('createConnectionStore baud rate changes', () => {
   it('applies a baud rate change immediately when already connected, without a re-prompt', async () => {
     const fakeSerial = new FakeSerial()

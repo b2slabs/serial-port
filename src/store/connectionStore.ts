@@ -19,11 +19,14 @@ export interface ConnectionStore {
    * component uses this to write straight into xterm.js.
    */
   subscribeToData: (listener: (chunk: string) => void) => () => void
-  /** Buffered composer text; held here rather than local component state. */
-  composerText: string
-  setComposerText: (text: string) => void
-  /** Sends the buffered composer text through SerialManager, then clears it. */
-  send: () => Promise<void>
+  /**
+   * Transmits `data` verbatim through `SerialManager` — no buffering, no
+   * app-appended line ending (ticket #11: the terminal itself is now the
+   * input surface, raw per-keystroke, replacing the composer). A no-op
+   * while not connected, so a keystroke arriving before/after a connection
+   * never throws or rejects unhandled.
+   */
+  sendRaw: (data: string) => void
 }
 
 /**
@@ -83,13 +86,9 @@ export function createConnectionStore(
         manager.addEventListener('data', handler)
         return () => manager.removeEventListener('data', handler)
       },
-      composerText: '',
-      setComposerText: (text) => set({ composerText: text }),
-      send: async () => {
-        if (!manager) return
-        const { composerText } = get()
-        await manager.send(composerText)
-        set({ composerText: '' })
+      sendRaw: (data) => {
+        if (!manager || get().status !== 'connected') return
+        void manager.send(data)
       },
     }
   })
