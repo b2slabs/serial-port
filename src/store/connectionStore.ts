@@ -58,7 +58,14 @@ export function createConnectionStore(
       status: 'disconnected',
       error: undefined,
       baudRate: profile ? profile.baudRate : DEFAULT_BAUD_RATE,
-      setBaudRate: (baudRate) => set({ baudRate }),
+      // Applies at any time, not just before the initial connect: if a
+      // session is open, `SerialManager#setBaudRate` safely closes and
+      // reopens the same port at the new rate; otherwise it's a no-op and
+      // this value is simply what the next connect()/reconnect() uses.
+      setBaudRate: (baudRate) => {
+        set({ baudRate })
+        void manager?.setBaudRate(baudRate)
+      },
       connect: async () => {
         if (!manager) return
         const { baudRate } = useConnectionStore.getState()

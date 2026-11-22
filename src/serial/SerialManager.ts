@@ -231,13 +231,40 @@ export class SerialManager extends EventTarget {
     }
 
     this.#disconnecting = true
+    await this.#teardownSession(session)
+    this.#session = null
+    this.#setState('disconnected')
+  }
+
+  /**
+   * Applies a new baud rate. The spec requires this be possible "at any
+   * time" rather than only before the initial connect: if a session is
+   * currently open, this safely stops the reader/writer, closes the port,
+   * and reopens the *same* already-authorized port (no re-prompt via
+   * `requestPort()`) with the new baud rate, resuming the read loop
+   * afterward — the same safe reconfiguration cycle `disconnect()` uses for
+   * teardown. A no-op when nothing is open; the caller is responsible for
+   * using the new baud rate on the next `connect()`/`reconnect()`.
+   */
+  async setBaudRate(baudRate: number): Promise<void> {
+    const session = this.#session
+    if (!session) {
+      return
+    }
+
+    this.#setState('connecting')
+    await this.#teardownSession(session)
+    this.#session = null
+
+    await this.#openAndTrack(session.port, baudRate)
+  }
+
+  /** Stops the read loop and closes the port for an open session. Does not touch `#state`/`#session` — callers decide what happens next. */
+  async #teardownSession(session: Session): Promise<void> {
     session.keepReading = false
     session.reader?.cancel()
     await session.readLoopPromise
     await session.port.close()
-
-    this.#session = null
-    this.#setState('disconnected')
   }
 
   /**

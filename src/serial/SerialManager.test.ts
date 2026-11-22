@@ -129,6 +129,78 @@ describe('SerialManager', () => {
     )
   })
 
+  describe('setBaudRate (change baud rate at any time)', () => {
+    it('safely closes and reopens the same already-authorized port at the new baud rate while connected', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+      const manager = new SerialManager(fakeSerial)
+      await manager.connect({ baudRate: 9600 })
+
+      await manager.setBaudRate(57600)
+
+      expect(fakeSerial.requestPort).toHaveBeenCalledOnce() // no re-prompt
+      expect(fakePort.close).toHaveBeenCalledOnce()
+      expect(fakePort.open).toHaveBeenLastCalledWith({
+        baudRate: 57600,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+      })
+      expect(manager.state).toBe('connected')
+    })
+
+    it('resumes receiving data at the new baud rate after the reopen', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+      const manager = new SerialManager(fakeSerial)
+      await manager.connect({ baudRate: 9600 })
+      await manager.setBaudRate(57600)
+
+      const received: string[] = []
+      manager.addEventListener('data', (event) => {
+        received.push((event as CustomEvent<string>).detail)
+      })
+
+      fakePort.emit(new TextEncoder().encode('resumed at new rate\r\n'))
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(received.join('')).toBe('resumed at new rate\r\n')
+    })
+
+    it('is a no-op (no open/close calls) when called while disconnected', async () => {
+      const fakeSerial = new FakeSerial()
+      const manager = new SerialManager(fakeSerial)
+
+      await manager.setBaudRate(57600)
+
+      expect(fakeSerial.requestPort).not.toHaveBeenCalled()
+      expect(manager.state).toBe('disconnected')
+    })
+
+    it('surfaces a clear error when reopening at the new baud rate fails', async () => {
+      const fakeSerial = new FakeSerial()
+      const fakePort = new FakeSerialPort()
+      fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+      const manager = new SerialManager(fakeSerial)
+      await manager.connect({ baudRate: 9600 })
+
+      fakePort.openError = new Error('Device is busy.')
+
+      await expect(manager.setBaudRate(57600)).rejects.toThrow(
+        'Device is busy.',
+      )
+      expect(manager.state).toBe('error')
+      expect(manager.error).toBe('Device is busy.')
+    })
+  })
+
   describe('reconnect (page-load reconnect-on-refresh)', () => {
     it('auto-reopens with the saved baud rate when getPorts() has exactly one match', async () => {
       const fakeSerial = new FakeSerial()

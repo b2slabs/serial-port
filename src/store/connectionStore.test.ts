@@ -117,3 +117,35 @@ describe('createConnectionStore persistence wiring', () => {
     expect(fakeSerial.getPorts).not.toHaveBeenCalled()
   })
 })
+
+describe('createConnectionStore baud rate changes', () => {
+  it('applies a baud rate change immediately when already connected, without a re-prompt', async () => {
+    const fakeSerial = new FakeSerial()
+    const fakePort = new FakeSerialPort()
+    fakeSerial.requestPort.mockResolvedValue(fakePort)
+
+    const useStore = createConnectionStore(fakeSerial)
+    await useStore.getState().connect()
+
+    useStore.getState().setBaudRate(57600)
+    await vi.waitFor(() => {
+      expect(fakePort.open).toHaveBeenLastCalledWith(
+        expect.objectContaining({ baudRate: 57600 }),
+      )
+    })
+
+    expect(fakeSerial.requestPort).toHaveBeenCalledOnce()
+    expect(useStore.getState().status).toBe('connected')
+    expect(useStore.getState().baudRate).toBe(57600)
+  })
+
+  it('just updates the stored value, with no manager calls, when not connected', () => {
+    const fakeSerial = new FakeSerial()
+    const useStore = createConnectionStore(fakeSerial)
+
+    useStore.getState().setBaudRate(19200)
+
+    expect(useStore.getState().baudRate).toBe(19200)
+    expect(fakeSerial.requestPort).not.toHaveBeenCalled()
+  })
+})

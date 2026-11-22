@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useConnection } from '../store/ConnectionStoreProvider'
 import { BAUD_RATE_PRESETS, isValidCustomBaudRate } from '../lib/baudRates'
+import { CONNECT_ATTEMPT_IN_FLIGHT_STATES } from '../serial/connectionStateDisplay'
 
 const CUSTOM_VALUE = 'custom'
 
@@ -8,11 +9,19 @@ const CUSTOM_VALUE = 'custom'
  * Preset baud rate dropdown plus a validated custom numeric entry. Only
  * baudRate is ever user-facing here — dataBits/stopBits/parity/flowControl
  * are fixed in SerialManager and never exposed in this UI.
+ *
+ * Changeable at any time, including while connected — `setBaudRate` on the
+ * store triggers `SerialManager`'s safe close/reopen cycle, which itself
+ * moves through `connecting` while the reopen is in flight. Only disabled
+ * during that in-flight window (same set the Connect button uses), so a
+ * second change can't race the first.
  */
 export function BaudRateSelect() {
   const baudRate = useConnection((state) => state.baudRate)
   const setBaudRate = useConnection((state) => state.setBaudRate)
-  const disabled = useConnection((state) => state.status !== 'disconnected')
+  const disabled = useConnection((state) =>
+    CONNECT_ATTEMPT_IN_FLIGHT_STATES.has(state.status),
+  )
 
   const isPreset = (BAUD_RATE_PRESETS as readonly number[]).includes(baudRate)
   const [customMode, setCustomMode] = useState(!isPreset)
