@@ -42,14 +42,14 @@ export function customKeyEventHandler(event: KeyboardEvent): boolean {
  * Ticket #12 adds a second, deliberate exception on top of that raw
  * passthrough, scoped to only Up/Down Arrow: every `onData` chunk is first
  * run through a `HistoryRecallEditor` (see `../terminal/historyRecall.ts`),
- * which decides whether this is still the common live-passthrough case (an
- * `{ forward }` effect, applied exactly as before via `sendRaw`) or the new
- * recall/edit case (an `{ echo }` effect, written straight into the
- * terminal with no network round-trip, or a `{ send }` effect once Enter
- * commits the recalled/edited line for real). One `HistoryRecallEditor`
- * instance lives for the lifetime of the mounted terminal, so history
- * persists across a session but not across remounts — matching the rest of
- * this component's session-scoped state.
+ * which returns a discriminated `OnDataEffect` — `'forward'` for the common
+ * live-passthrough case (applied exactly as before via `sendRaw`), `'echo'`
+ * for the recall/edit case (written straight into the terminal with no
+ * network round-trip), `'send'` once Enter commits a recalled/edited line
+ * for real, or `'none'`. One `HistoryRecallEditor` instance lives for the
+ * lifetime of the mounted terminal, so history persists across a session but
+ * not across remounts — matching the rest of this component's
+ * session-scoped state.
  *
  * Fixed 10,000 line scrollback, not configurable in this ticket.
  */
@@ -83,9 +83,17 @@ export function SerialTerminal() {
     const recallEditor = new HistoryRecallEditor()
     const dataListener = terminal.onData((data) => {
       const effect = recallEditor.onData(data)
-      if (effect.forward !== undefined) sendRaw(effect.forward)
-      if (effect.send !== undefined) sendRaw(effect.send)
-      if (effect.echo !== undefined) terminal.write(effect.echo)
+      switch (effect.kind) {
+        case 'forward':
+        case 'send':
+          sendRaw(effect.bytes)
+          break
+        case 'echo':
+          terminal.write(effect.bytes)
+          break
+        case 'none':
+          break
+      }
     })
 
     return () => {
