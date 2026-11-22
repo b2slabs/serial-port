@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useConnection } from '../store/ConnectionStoreProvider'
+import { HistoryRecallEditor } from '../terminal/historyRecall'
 
 const SCROLLBACK_LINES = 10_000
 
@@ -38,6 +39,18 @@ export function customKeyEventHandler(event: KeyboardEvent): boolean {
  * own refresh handling takes over instead. A raw per-keystroke send path and
  * a custom key event handler aren't mutually exclusive.
  *
+ * Ticket #12 adds a second, deliberate exception on top of that raw
+ * passthrough, scoped to only Up/Down Arrow: every `onData` chunk is first
+ * run through a `HistoryRecallEditor` (see `../terminal/historyRecall.ts`),
+ * which decides whether this is still the common live-passthrough case (an
+ * `{ forward }` effect, applied exactly as before via `sendRaw`) or the new
+ * recall/edit case (an `{ echo }` effect, written straight into the
+ * terminal with no network round-trip, or a `{ send }` effect once Enter
+ * commits the recalled/edited line for real). One `HistoryRecallEditor`
+ * instance lives for the lifetime of the mounted terminal, so history
+ * persists across a session but not across remounts — matching the rest of
+ * this component's session-scoped state.
+ *
  * Fixed 10,000 line scrollback, not configurable in this ticket.
  */
 export function SerialTerminal() {
@@ -67,8 +80,12 @@ export function SerialTerminal() {
     const unsubscribeData = subscribeToData((chunk) => {
       terminal.write(chunk)
     })
+    const recallEditor = new HistoryRecallEditor()
     const dataListener = terminal.onData((data) => {
-      sendRaw(data)
+      const effect = recallEditor.onData(data)
+      if (effect.forward !== undefined) sendRaw(effect.forward)
+      if (effect.send !== undefined) sendRaw(effect.send)
+      if (effect.echo !== undefined) terminal.write(effect.echo)
     })
 
     return () => {
